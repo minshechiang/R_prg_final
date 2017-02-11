@@ -280,6 +280,14 @@ to_predict[group3, ]$Age &lt;- 24
 View(to_predict)</code></pre>
 </div>
 </div>
+<div class="section level2">
+<h2>預測與上傳</h2>
+<pre class="r"><code>predictedSurvival &lt;- predict(modelFunction, to_predict[, c(&quot;Pclass&quot;, &quot;Sex&quot;, &quot;Age&quot;, &quot;SibSp&quot;, &quot;Parch&quot;, &quot;Fare&quot;)], type=&quot;class&quot;)
+to_submit &lt;- data.frame(to_predict[, &quot;PassengerId&quot;], predictedSurvival)
+names(to_submit) &lt;- c(&quot;PassengerId&quot;, &quot;Survived&quot;)
+
+write.csv(to_submit, file = &quot;to_submit.csv&quot;, row.names = FALSE)</code></pre>
+</div>
 </div>
 
 
