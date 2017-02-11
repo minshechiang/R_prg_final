@@ -1,0 +1,104 @@
+#R Programming 期末作業
+*姜佩君*
+---
+
+##讀入資料集
+```{R message=FALSE, warning=FALSE}
+titanic <- read.csv("https://storage.googleapis.com/r_rookies/kaggle_titanic_train.csv")
+```
+
+
+##檢視原始資料
+```{R message=FALSE, warning=FALSE}
+str(titanic)
+```
+Pclass:社經地位1(upper)<2(middle)<3(lower)，需要更正為1>2>3</br>
+sibsp:手足/配偶在船上的人數</br>
+parch:直系親屬(父母/子女)在船上的人數</br>
+Embarked:登船港口(C = Cherbourg; Q = Queenstown; S = Southampton)
+
+
+##描述性統計
+```{R message=FALSE, warning=FALSE}
+summary(titanic)
+```
+
+
+##清理資料(只留下完整的cases)
+```{R message=FALSE, warning=FALSE}
+
+library(dplyr)
+library(magrittr)
+theModel <- titanic[complete.cases(titanic),]
+
+View(theModel)
+```
+
+##建立分類模型
+
+###切分測試與訓練資料
+```{R message=FALSE, warning=FALSE}
+set.seed(620)
+n <- nrow(theModel)
+shuffled_theModel <- theModel[sample(n), ] #洗牌
+train <- shuffled_theModel[1:round(0.7 * n), ] #前70%為測試資料
+test <- shuffled_theModel[(round(0.7 * n) + 1):n, ] #後30%為訓練資料
+```
+
+###建立分類器(預測公式)
+```{R message=FALSE, warning=FALSE}
+library(rpart)
+modelFunction <- rpart(Survived ~ Pclass + Age + SibSp + Parch + Fare,
+                              data=train, method="class")
+```
+
+###計算正確率
+```{R message=FALSE, warning=FALSE}
+prediction <- predict(modelFunction, 
+                      test[, c("Pclass", "Sex", "Age", "SibSp", "Parch", "Fare")],
+                      type="class")
+confusion_matrix <- table(test$Survived, prediction)
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+accuracy
+```
+
+#探索沒有答案的資料
+```{R message=FALSE, warning=FALSE}
+to_predict <- read.csv("https://storage.googleapis.com/py_ds_basic/kaggle_titanic_test.csv")
+summary(to_predict)
+```
+
+##清理觀察值
+###填補票價缺失值
+```{R message=FALSE, warning=FALSE}
+to_predict$Fare[is.na(to_predict$Fare)] <- mean(to_predict$Fare, rm.na=TRUE)
+```
+
+###填補年齡缺失值
+```{R message=FALSE, warning=FALSE}
+#計算各社經地位分組之平均年齡
+meanAge_byPclass <- to_predict %>% group_by(Pclass) %>%
+  summarise(meanAge=round(mean(Age, na.rm=TRUE)))
+View(meanAge_byPclass) #檢視各組年齡平均
+
+#將年齡缺失的乘客按社經地位分組
+group1 <- is.na(to_predict$Age)&to_predict$Pclass==1
+group2 <- is.na(to_predict$Age)&to_predict$Pclass==2
+group3 <- is.na(to_predict$Age)&to_predict$Pclass==3
+
+#以各組平均填補缺失值(第一組41、第二組29、第三組24)
+to_predict[group1, ]$Age <- 41
+to_predict[group2, ]$Age <- 29
+to_predict[group3, ]$Age <- 24
+
+View(to_predict)
+```
+
+##預測與上傳
+```{R message=FALSE, warning=FALSE}
+predictedSurvival <- predict(modelFunction, to_predict[, c("Pclass", "Sex", "Age", "SibSp", "Parch", "Fare")], type="class")
+to_submit <- data.frame(to_predict[, "PassengerId"], predictedSurvival)
+names(to_submit) <- c("PassengerId", "Survived")
+
+write.csv(to_submit, file = "to_submit.csv", row.names = FALSE)
+```
