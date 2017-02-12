@@ -12,7 +12,7 @@ titanic <- read.csv("https://storage.googleapis.com/r_rookies/kaggle_titanic_tra
 ```{R message=FALSE, warning=FALSE}
 str(titanic)
 ```
-Pclass:社經地位1(upper)<2(middle)<3(lower)，需要更正為1>2>3</br>
+Pclass:社經地位1(upper)<2(middle)<3(lower)</br>
 sibsp:手足/配偶在船上的人數</br>
 parch:直系親屬(父母/子女)在船上的人數</br>
 Embarked:登船港口(C = Cherbourg; Q = Queenstown; S = Southampton)
@@ -24,17 +24,27 @@ summary(titanic)
 ```
 
 
-##清理資料(只留下完整的cases)
+##清理資料
 ```{R message=FALSE, warning=FALSE}
 
 library(dplyr)
 library(magrittr)
-theModel <- titanic[complete.cases(titanic),]
+
+#留下完整的cases
+theModel <- titanic[complete.cases(titanic),] 
+
+#設定nominal變項
+theModel$PclassF <- as.factor(theModel$Pclass)
+contrasts(theModel$PclassF) <- contr.treatment(3, base=3)
+
+#新增迴歸分析用變項
+theModel$IsKid <- theModel$Age<=18 #小孩 
+theModel$Family <- theModel$SibSp*theModel$Parch #手足配偶x直系血親交互作用
 
 View(theModel)
 ```
 
-##建立分類模型
+##建立模型
 
 ###切分測試與訓練資料
 ```{R message=FALSE, warning=FALSE}
@@ -45,21 +55,53 @@ train <- shuffled_theModel[1:round(0.7 * n), ] #前70%為測試資料
 test <- shuffled_theModel[(round(0.7 * n) + 1):n, ] #後30%為訓練資料
 ```
 
-###建立分類器(預測公式)
+###建立預測公式
 ```{R message=FALSE, warning=FALSE}
 library(rpart)
-modelFunction <- rpart(Survived ~ Pclass + Age + SibSp + Parch + Fare,
+#分類模型
+modelFunction <- rpart(Survived ~ PclassF + Sex + Age + SibSp + Parch + Fare + Embarked,
                               data=train, method="class")
+
+#邏輯迴歸模型
+logitModel <- glm(Survived ~ PclassF + Sex + Age + SibSp + Parch + Fare + Embarked,
+                  data=train, family=binomial(link="logit"))
+summary(logitModel)
+
+#更新版邏輯迴歸模型
+logitModel_new <- glm(Survived ~ PclassF + Sex + IsKid + Parch + Family,
+                      data=train, family=binomial(link="logit"))
+summary(logitModel_new)
 ```
 
 ###計算正確率
 ```{R message=FALSE, warning=FALSE}
-prediction <- predict(modelFunction, 
-                      test[, c("Pclass", "Sex", "Age", "SibSp", "Parch", "Fare")],
+
+#分類模型的正確率
+prediction1 <- predict(modelFunction, 
+                      test[, c("PclassF", "Sex", "Age", "SibSp", "Parch", "Fare", "Embarked")],
                       type="class")
-confusion_matrix <- table(test$Survived, prediction)
-accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
-accuracy
+confusion_matrix1 <- table(test$Survived, prediction1)
+accuracy1 <- sum(diag(confusion_matrix1)) / sum(confusion_matrix1)
+accuracy1
+
+#邏輯迴歸模型的正確率
+prediction2 <- predict(logitModel, 
+                      test[, c("PclassF", "Sex", "Age", "SibSp", "Parch", "Fare", "Embarked")],
+                      type="response") %>% round()
+
+confusion_matrix2 <- table(test$Survived, prediction2)
+accuracy2 <- sum(diag(confusion_matrix2)) / sum(confusion_matrix2)
+accuracy2
+
+#更新版邏輯迴歸正確率
+prediction3 <- predict(logitModel_new, 
+                       test[, c("PclassF", "Sex", "IsKid", "Parch", "Family")],
+                       type="response") %>% round()
+
+confusion_matrix3 <- table(test$Survived, prediction3)
+accuracy3 <- sum(diag(confusion_matrix3)) / sum(confusion_matrix3)
+accuracy3
+
 ```
 
 #探索沒有答案的資料
@@ -69,36 +111,73 @@ summary(to_predict)
 ```
 
 ##清理觀察值
-###填補票價缺失值
+
 ```{R message=FALSE, warning=FALSE}
-to_predict$Fare[is.na(to_predict$Fare)] <- mean(to_predict$Fare, rm.na=TRUE)
+#填補票價缺失值
+fare_mean <- mean(to_predict$Fare, na.rm = TRUE)
+to_predict$Fare[is.na(to_predict$Fare)] <- fare_mean
+
+#設定nominal變項
+to_predict$PclassF <- as.factor(to_predict$Pclass)
+contrasts(to_predict$PclassF) <- contr.treatment(3, base=3)
 ```
 
 ###填補年齡缺失值
 ```{R message=FALSE, warning=FALSE}
 #計算各社經地位分組之平均年齡
-meanAge_byPclass <- to_predict %>% group_by(Pclass) %>%
+meanAge_byPclassF <- to_predict %>% group_by(PclassF) %>%
   summarise(meanAge=round(mean(Age, na.rm=TRUE)))
-View(meanAge_byPclass) #檢視各組年齡平均
+View(meanAge_byPclassF) #檢視各組年齡平均
 
 #將年齡缺失的乘客按社經地位分組
-group1 <- is.na(to_predict$Age)&to_predict$Pclass==1
-group2 <- is.na(to_predict$Age)&to_predict$Pclass==2
-group3 <- is.na(to_predict$Age)&to_predict$Pclass==3
+group1 <- is.na(to_predict$Age)&to_predict$PclassF==1
+group2 <- is.na(to_predict$Age)&to_predict$PclassF==2
+group3 <- is.na(to_predict$Age)&to_predict$PclassF==3
 
 #以各組平均填補缺失值(第一組41、第二組29、第三組24)
 to_predict[group1, ]$Age <- 41
 to_predict[group2, ]$Age <- 29
 to_predict[group3, ]$Age <- 24
 
+```
+
+###新增迴歸分析用變項
+```{R message=FALSE, warning=FALSE}
+to_predict$IsKid <- to_predict$Age<=18 #小孩
+to_predict$Family <- to_predict$SibSp*to_predict$Parch #手足配偶x直系血親交互作用
+
 View(to_predict)
 ```
 
 ##預測與上傳
 ```{R message=FALSE, warning=FALSE}
-predictedSurvival <- predict(modelFunction, to_predict[, c("Pclass", "Sex", "Age", "SibSp", "Parch", "Fare")], type="class")
-to_submit <- data.frame(to_predict[, "PassengerId"], predictedSurvival)
-names(to_submit) <- c("PassengerId", "Survived")
 
-write.csv(to_submit, file = "to_submit.csv", row.names = FALSE)
+#分類模型預測
+answer1 <- predict(modelFunction, 
+                      to_predict[, c("PclassF", "Sex", "Age", "SibSp", "Parch", "Fare", "Embarked")],
+                      type="class")
+to_submit1 <- data.frame(to_predict[, "PassengerId"], answer1)
+names(to_submit1) <- c("PassengerId", "Survived")
+
+write.csv(to_submit1, file = "to_submit1.csv", row.names = FALSE)
+
+#邏輯迴歸模型預測
+answer2 <- predict(logitModel, 
+                      to_predict[, c("PclassF", "Sex", "Age", "SibSp", "Parch", "Fare", "Embarked")],
+                      type="response") %>% round()
+to_submit2 <- data.frame(to_predict[, "PassengerId"], answer2)
+names(to_submit2) <- c("PassengerId", "Survived")
+
+write.csv(to_submit2, file = "to_submit2.csv", row.names = FALSE)
+
+#更新版邏輯迴歸預測
+answer3 <- predict(logitModel_new, to_predict[, c("PclassF", "Sex", "IsKid", "Parch", "Family")], type="response") %>%round()
+to_submit3 <- data.frame(to_predict[, "PassengerId"], answer3)
+names(to_submit3) <- c("PassengerID", "Survived")
+
+write.csv(to_submit3, file = "to_submit3.csv", row.names = FALSE)
 ```
+
+##上傳後截圖
+最高分0.76077
+![分數截圖](http://imgur.com/Pg38e5x.jpg)
